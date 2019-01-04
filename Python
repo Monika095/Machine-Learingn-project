@@ -1,0 +1,283 @@
+# 1
+#HOLDER TABLE FUNCTION
+
+import numpy as np
+a , b = (-5, 5)
+def f(x):
+    return -(np.fabs(np.sin(x[0])*np.cos(x[1]) * np.e**(np.fabs(1- (np.sqrt(x[0]**2 + x[1]**2))/np.pi))))
+
+# 2
+
+#3D plot
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import axes3d
+
+mpl.rcParams['legend.fontsize'] = 10
+x = np.linspace(a, b, 1000)
+y = np.linspace(a, b, 1000)
+x, y = np.meshgrid(x, y)
+z = f([x, y])
+fig = plt.figure(figsize=(15, 10))
+ax = fig.add_subplot(111, projection='3d')
+ax.plot_surface(x, y, z, cmap='viridis')
+plt.show()
+
+
+# 3
+
+import math
+from copy import deepcopy
+
+def nbits(a, b, dx):
+    dl = abs(b-a)
+    B = math.ceil(dl/dx).bit_length()
+    dx_new = dl/(2**B-1)
+    return B, dx_new
+
+def gen_population(P, N, B):
+    pop = np.random.randint(2, size=(P, N*B))
+    return pop
+
+def decode_individual(individual, N, B, a, dx, decoding_vec):
+    temp = individual.reshape(N, B)
+    decoded_individual = temp@decoding_vec * dx + a
+    return decoded_individual
+
+def evaluate_population(func, pop, N, B, a, dx, decoding_vec):
+    decoded_pop = np.apply_along_axis(decode_individual, 1, pop, N=N, B=B,
+    a=a, dx=dx, decoding_vec=decoding_vec)
+    evaluated_pop = np.apply_along_axis(func, 1, decoded_pop)
+    return evaluated_pop
+
+def get_best(pop, evaluated_pop):
+    best_ind = np.argmax(evaluated_pop)
+    best_individual = pop[best_ind]
+    best_value = evaluated_pop[best_ind]
+    return best_individual, best_value
+
+def cross(pop, pc):
+    pop_size = pop.shape[0]
+    new_pop = pop.copy()
+    do_cross = np.random.random(size=pop_size) < pc
+    if do_cross.sum() < 2:
+        return new_pop
+    ind_to_cross = np.array(range(pop_size))[do_cross]
+    cross_pairs = np.random.choice(ind_to_cross, size=(int(ind_to_cross.size/2), 2), replace=False)
+    cross_points = np.random.randint(1, pop.shape[1], size=cross_pairs.shape[0])
+    for pair, cross_point in zip(cross_pairs, cross_points):
+        individual1 = new_pop[pair[0]].copy()
+        individual2 = new_pop[pair[1]].copy()
+        new_pop[pair[0]][cross_point:] = individual2[cross_point:]
+        new_pop[pair[1]][cross_point:] = individual1[cross_point:]
+    return new_pop
+
+
+def mutate(pop, pm):
+    do_mutation = np.random.random(size=(pop.shape[0], pop.shape[1])) < pm
+    new_pop = pop.copy()
+    new_pop[do_mutation] = (pop[do_mutation] + 1) % 2
+    return new_pop
+
+def roulette(pop, evaluated_pop):
+    adaptation_values = evaluated_pop.copy()
+    if adaptation_values.min() <= 0:
+        adaptation_values += abs(adaptation_values.min()) + 1
+    rand_list = np.random.random(size=pop.shape[0])
+    d = adaptation_values.cumsum()/adaptation_values.sum()
+    new_pop = np.array([pop[np.argmax(d > rand_l)] for rand_l in rand_list])
+    return new_pop
+
+# 4
+
+
+#implementation of the main loop
+classical genetic algorithm
+
+def evolve(fun, pop_size, pc, pm, generations, a, b, dx, N=2):
+    B, new_dx = nbits(a, b, dx)
+    pop = gen_population(pop_size, N, B)
+    decoding_vec = 2 ** (-np.arange(-B + 1, 1, dtype='int64'))
+    evaluated_pop = evaluate_population(fun, pop, N, B, a, new_dx, decoding_vec)
+    best_sol, best_val = get_best(pop, evaluated_pop)
+    list_best = [best_val]
+    list_best_generation = [best_val]
+    list_mean = [evaluated_pop.mean()]
+    first_gen = np.apply_along_axis(decode_individual, 1, pop, N=N, B=B, a=a, dx=new_dx, decoding_vec=decoding_vec)
+    first_gen_ev = np.apply_along_axis(fun, 1, first_gen)
+    for i in range(generations):
+        pop = roulette(pop, evaluated_pop)
+        pop = cross(pop, pc)
+        pop = mutate(pop, pm)
+        evaluated_pop = evaluate_population(fun, pop, N, B, a, new_dx, decoding_vec)
+        best_sol_tmp, best_val_tmp = get_best(pop, evaluated_pop)
+        if best_val_tmp > best_val:
+            best_sol = best_sol_tmp.copy()
+            best_val = best_val_tmp
+            list_best.append(best_val)
+        else:
+            list_best.append(best_val)
+        list_best_generation.append(best_val)
+        list_mean.append(evaluated_pop.mean())
+        if i == int(generations/2):
+            middle_gen = np.apply_along_axis(decode_individual, 1, pop, N=N, B=B, a=a, dx=new_dx, decoding_vec=decoding_vec)
+            middle_gen_ev = np.apply_along_axis(fun, 1, middle_gen)
+    last_gen = np.apply_along_axis(decode_individual, 1, pop, N=N, B=B, a=a, dx=new_dx, decoding_vec=decoding_vec)
+    last_gen_ev = np.apply_along_axis(fun, 1, last_gen)
+    best_individual = decode_individual(best_sol, N, B, a, new_dx, decoding_vec)
+    best_generation = np.argmax(list_best)
+    return best_individual, best_generation, list_best, list_best_generation, list_mean, first_gen, first_gen_ev, middle_gen, middle_gen_ev, last_gen, last_gen_ev
+
+# 5
+
+#presentation ex4
+
+import pandas as pd
+np.random.seed(24)
+best_individual, best_generation, list_best, list_best_generation, list_mean, first_gen, first_gen_ev, middle_gen, middle_gen_ev, last_gen, last_gen_ev = evolve(f, 60, 0.7, 0.01, 200, a, b, 1e-10)
+pd.set_option("display.max_rows", 201)
+print(" The best solution", best_individual)
+print("Generation with the best solution:", best_generation)
+print(pd.DataFrame(np.array([list_best, list_best_generation, list_mean]).T,
+columns=('list_best', 'list_best_generation', 'list_mean')))
+
+# 6
+
+In the 3D function graphs, present the position of individuals from the first population, in the middle
+evolution and the final population. Mark clearly the location of the best solution.
+On 2D charts, present the course of values from lists with collected statistics (list list_best,
+list_best_generation, list_mean) depending on the generation number#
+
+x = np.linspace(a, b, 100)
+y = np.linspace(a, b, 100)
+x, y = np.meshgrid(x, y)
+z = f([x, y])
+x_best, y_best = best_individual
+z_best = f(best_individual)
+fig = plt.figure(figsize=(15, 10))
+ax = fig.add_subplot(111, projection='3d')
+ax.plot_wireframe(x, y, z, alpha=1, color="grey")
+ax.scatter3D(first_gen[::, 0], first_gen[::, 1], first_gen_ev,\
+color='red', marker='s')
+ax.scatter3D(middle_gen[::, 0], middle_gen[::, 1], middle_gen_ev,\
+color='purple', marker='^')
+ax.scatter3D(last_gen[::, 0], last_gen[::, 1], last_gen_ev,\
+color='blue', marker='o')
+ax.scatter3D(x_best, y_best, z_best, color='magenta', marker='x', s=500)
+ax.view_init(45, -120)
+l1 = mpl.lines.Line2D([0], [0], linestyle="none", c='red',\
+marker='s', label="First generation")
+l2 = mpl.lines.Line2D([0], [0], linestyle="none", c='purple',\
+marker='^', label="Middle generation")
+l3 = mpl.lines.Line2D([0], [0], linestyle="none", c='blue',\
+marker='o', label="Last generation")
+l4 = mpl.lines.Line2D([0], [0], linestyle="none", c='magenta',\
+marker='x', label="The best solution")
+plt.legend(handles=[l1, l2, l3, l4])
+plt.show()
+
+
+x = list(range(201))
+y_max = max(list_best) + max(list_best)/5
+ymin = min(list_mean)
+fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, ncols=1)
+ax1.plot(x, list_best)
+ax1.set_ylim(ymin, y_max)
+ax1.set_title('list_best')
+ax2.plot(x, list_best_generation)
+ax2.set_ylim(ymin, y_max)
+ax2.set_title('list_best_generation')
+ax3.plot(x, list_mean)
+ax3.set_ylim(ymin, y_max)
+ax3.set_title('list_mean')
+plt.tight_layout()
+plt.show()
+
+# 7
+1. How does the algorithm work with typical parameter settings (as in task 5)? Enter the average
+the value of adapting the solution found after repeatedly running the AG.
+2. Does lengthening evolution bring improvement or is there a "saturation"? Compare both
+how a good solution was found, as well as in which generation.
+generations: several different values from the range [100, 10000]
+3. Is the mutation necessary?
+pm = 0.0
+4. How does the algorithm work without crossing, with the mutation itself?
+pk = 0.0
+5. Is it better to evolve a smaller population or be shorter if the number of evaluations is longer
+the function is the same (e.g., 2000)?
+compare two settings: pop_size = 20, generations = 100 vs. pop_size = 100, generations = 20.
+
+
+pd.set_option("display.max_columns", 5)
+np.random.seed()
+
+#7.1
+
+best_val1 = np.array([evolve(f, 60, 0.7, 0.01, 200, a, b, 1e-10)[2][-1] for _ in range(1)])
+print(best_val1.mean())
+
+#7.2
+my_range = [100, 500, 1000, 2000, 5000, 10000]
+gen_num_comparison = []
+for gen_num in my_range:
+    best_i_val_gen = []
+    for i in range(10):
+        ev_i = evolve(f, 60, 0.7, 0.01, gen_num, a, b, 1e-10)
+    best_i_val_gen.append([ev_i[2][-1], ev_i[1]])
+    gen_num_mean = np.mean(np.array(best_i_val_gen), 0)
+    gen_num_std = np.std(np.array(best_i_val_gen), 0)
+    gen_num_comparison.append([gen_num, gen_num_mean[0], gen_num_std[0], gen_num_mean[1], gen_num_std[1]])
+    gen_num_comparison_df = pd.DataFrame(np.array(gen_num_comparison), columns=['Number of generations', 'Average best fit', 'Std of fit', 'Average GWBI', 'Std of GWBI'])
+    print(gen_num_comparison_df.to_string(index=False))
+
+#7.3
+
+best_no_mutation = []
+best_mutation = []
+for i in range(10):
+    tmp_ev_nm = evolve(f, 60, 0.7, 0, 200, a, b, 1e-10)
+    tmp_ev_m = evolve(f, 60, 0.7, 0.01, 200, a, b, 1e-10)
+    best_no_mutation.append([tmp_ev_nm[2][-1], tmp_ev_nm[1]])
+    best_mutation.append([tmp_ev_m[2][-1], tmp_ev_m[1]])
+no_mutation_mean = np.mean(np.array(best_no_mutation), 0)
+no_mutation_std = np.std(np.array(best_no_mutation), 0)
+mutation_mean = np.mean(np.array(best_mutation), 0)
+mutation_std = np.std(np.array(best_mutation), 0)
+mutation_comparison = np.array([[0, no_mutation_mean[0], no_mutation_std[0],no_mutation_mean[1], no_mutation_std[1]], [1, mutation_mean[0], mutation_std[0],mutation_mean[1], mutation_std[1]]])
+mutation_comparison_df = pd.DataFrame(np.array(mutation_comparison), columns=['Mutation', 'Average best fit', 'Std of fit', 'Average GWBI', 'Std of GWBI'])
+print(mutation_comparison_df.to_string(index=False))
+
+# 7.4
+
+best_no_cross = []
+best_cross = []
+for i in range(10):
+    tmp_ev_nc = evolve(f, 60, 0, 0.01, 200, a, b, 1e-10)
+    tmp_ev_c = evolve(f, 60, 0.7, 0.01, 200, a, b, 1e-10)
+    best_no_cross.append([tmp_ev_nc[2][-1], tmp_ev_nc[1]])
+    best_cross.append([tmp_ev_c[2][-1], tmp_ev_c[1]])
+no_cross_mean = np.mean(np.array(best_no_cross), 0)
+no_cross_std = np.std(np.array(best_no_cross), 0)
+cross_mean = np.mean(np.array(best_cross), 0)
+cross_std = np.std(np.array(best_cross), 0)
+cross_comparison = np.array([[0, no_cross_mean[0], no_cross_std[0], no_cross_mean[1], no_cross_std[1]],[1, cross_mean[0], cross_std[0], cross_mean[1],cross_std[1]]])
+cross_comparison_df = pd.DataFrame(np.array(cross_comparison), columns=['Cross', 'Average best fit', 'Std of fit', 'Average GWBI', 'Std of GWBI'])
+print(cross_comparison_df.to_string(index=False))
+
+# 7.5
+
+best_sp = []
+best_bp = []
+for i in range(20):
+    tmp_ev_sp = evolve(f, 20, 0.7, 0.01, 100, a, b, 1e-10)
+    tmp_ev_bp = evolve(f, 100, 0.7, 0.01, 20, a, b, 1e-10)
+    best_sp.append([tmp_ev_sp[2][-1], tmp_ev_sp[1]])
+    best_bp.append([tmp_ev_bp[2][-1], tmp_ev_bp[1]])
+sp_mean = np.mean(np.array(best_sp), 0)
+sp_std = np.std(np.array(best_sp), 0)
+bp_mean = np.mean(np.array(best_bp), 0)
+bp_std = np.std(np.array(best_bp), 0)
+pop_comparison = np.array([[20, sp_mean[0], sp_std[0], sp_mean[1], sp_std[1]], [100, bp_mean[0], bp_std[0], bp_mean[1], bp_std[1]]])
+pop_comparison_df = pd.DataFrame(np.array(pop_comparison), columns=['Pop size','Average best fit', 'Std of fit', 'Average GWBI', 'Std of GWBI'])
+print(pop_comparison_df.to_string(index=False))
